@@ -3,7 +3,7 @@
     "name": "Wheely_Me",
     "slug": "Wheely_Me",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "landscape",
     "icon": "./assets/images/icon.png",
     "scheme": "wheelyme",
     "userInterfaceStyle": "automatic",

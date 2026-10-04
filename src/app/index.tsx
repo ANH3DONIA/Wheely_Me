@@ -1,21 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer, LightSensor } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
+// Ancho máximo estimado para generar estrellas uniformemente sin depender del ancho inicial de la pantalla
+const MAX_BG_WIDTH = 2000;
 
 const NUM_STARS = 40;
 const STARS = Array.from({ length: NUM_STARS }).map(() => ({
   top: Math.random() * 200,
-  left: Math.random() * SCREEN_WIDTH,
+  left: Math.random() * MAX_BG_WIDTH,
   size: Math.random() * 3 + 1,
 }));
 
-// Nubes: posición fija, menos nubes pero más estéticas
+// Nubes: ahora usamos posiciones absolutas más separadas para landscape (pantalla más ancha)
 const CLOUDS = [
-  { top: 18, left: SCREEN_WIDTH * 0.04 },
-  { top: 55, left: SCREEN_WIDTH * 0.55 },
+  { top: 18, left: 100 },
+  { top: 55, left: 600 },
+  { top: 25, left: 1200 }, // Añadimos una nube extra para rellenar la pantalla horizontal
 ];
 
 // Nube caricaturizada: base plana + burbujas uniformes encima
@@ -41,6 +44,9 @@ function Cloud({ top, left }: { top: number; left: number }) {
 }
 
 export default function WheelyMeGame() {
+  const { width: SCREEN_WIDTH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  
   const [carX, setCarX] = useState(0);
   const [carAngle, setCarAngle] = useState(0);
   const [gameOver, setGameOver] = useState(false);
@@ -73,8 +79,8 @@ export default function WheelyMeGame() {
     Accelerometer.setUpdateInterval(50);
     const subscription = Accelerometer.addListener(data => {
       if (!isMounted) return;
-      // Invertimos el eje X para que coincida con el movimiento real del dispositivo
-      const tiltDegrees = -(data.x * 90);
+      // En landscape, el eje Y (data.y) es el que detecta la inclinación de "volante" (izquierda/derecha).
+      const tiltDegrees = (data.y * 90);
       tiltRef.current = tiltDegrees;
 
       const adjustedTilt = tiltDegrees - calibratedZeroRef.current;
@@ -117,12 +123,12 @@ export default function WheelyMeGame() {
             setBackgroundColor('#E0FFFF'); // Muy claro (Sol / Linterna directa)
           }
 
-          // Estrellas: Solo se ven si es "de noche" (illuminance < 1000)
+          // Estrellas: Solo se ven si es "de noche" (illuminance < 800)
           // La opacidad va de 0 a 1 dependiendo de qué tan oscuro esté.
-          if (illuminance >= 1000) {
+          if (illuminance >= 800) {
             setStarOpacity(0);
           } else {
-            setStarOpacity(1 - (illuminance / 1000));
+            setStarOpacity(1 - (illuminance / 800));
           }
         });
       } else {
@@ -240,16 +246,6 @@ export default function WheelyMeGame() {
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
-      <Text style={styles.title}>Wheely Me</Text>
-      <Text style={styles.score}>Puntaje: {Math.floor(score)}</Text>
-      <Text style={styles.highScore}>Récord: {highScore}</Text>
-
-      {/* Sensor Indicator */}
-      <View style={styles.sensorIndicator}>
-        <Text style={styles.sensorText}>{tiltDisplay}</Text>
-        <Text style={styles.sensorText}>{lightDisplay}</Text>
-      </View>
-
       <View style={styles.gameArea}>
         {/* Estrellas dinámicas en el fondo (Parallax lento) */}
         <View style={[StyleSheet.absoluteFill, { opacity: starOpacity }]}>
@@ -314,6 +310,28 @@ export default function WheelyMeGame() {
         </View>
       </View>
 
+      {/* Interfaz de usuario superior (HUD) adaptada para landscape con Safe Areas */}
+      <View style={[styles.hudContainer, { 
+        paddingTop: Math.max(insets.top, 15), 
+        paddingLeft: Math.max(insets.left, 20), 
+        paddingRight: Math.max(insets.right, 20) 
+      }]}>
+        <Text style={styles.title}>Wheely Me</Text>
+        <View style={styles.scoreContainer}>
+          <Text style={styles.score}>Puntaje: {Math.floor(score)}</Text>
+          <Text style={styles.highScore}>Récord: {highScore}</Text>
+        </View>
+      </View>
+
+      {/* Indicadores de sensores adaptados para que no estorben */}
+      <View style={[styles.sensorIndicator, { 
+        bottom: Math.max(insets.bottom, 15), 
+        left: Math.max(insets.left, 20) 
+      }]}>
+        <Text style={styles.sensorText}>{tiltDisplay}</Text>
+        <Text style={styles.sensorText}>{lightDisplay}</Text>
+      </View>
+
       {gameOver && (
         <View style={styles.gameOverContainer}>
           <Text style={styles.gameOverText}>¡Fin del juego!</Text>
@@ -329,12 +347,17 @@ export default function WheelyMeGame() {
         </View>
       )}
 
-      {/* Controls */}
-      <View style={styles.controls}>
-        <TouchableOpacity style={styles.controlButton} onPress={handleCalibrate}>
-          <Text style={styles.controlText}>Calibrar Centro</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Botón de calibración flotante en la esquina inferior derecha */}
+      <TouchableOpacity 
+        style={[styles.calibrateButton, { 
+          bottom: Math.max(insets.bottom, 15), 
+          right: Math.max(insets.right, 20) 
+        }]} 
+        onPress={handleCalibrate}
+      >
+        <Text style={styles.calibrateIcon}>⚖️</Text>
+        <Text style={styles.calibrateText}>Centrar</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -342,36 +365,50 @@ export default function WheelyMeGame() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 60,
+  },
+  hudContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    zIndex: 10,
   },
   title: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
-    textAlign: 'center',
     color: '#fff',
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 5,
   },
+  scoreContainer: {
+    alignItems: 'flex-end',
+  },
   score: {
     fontSize: 20,
-    textAlign: 'center',
     color: '#fff',
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   highScore: {
-    fontSize: 16,
-    textAlign: 'center',
+    fontSize: 14,
     color: 'rgba(255,255,255,0.85)',
-    marginBottom: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   sensorIndicator: {
+    position: 'absolute',
     backgroundColor: 'rgba(0,0,0,0.5)',
-    alignSelf: 'center',
-    paddingHorizontal: 15,
+    paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 15,
-    marginBottom: 10,
+    borderRadius: 10,
+    zIndex: 10,
   },
   sensorText: {
     color: '#fff',
@@ -388,14 +425,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 140, // La altura justa para que el carrito quede posado encima
+    height: 60, // Terreno más bajo para ver más fondo
     backgroundColor: '#4CAF50', // Color de pasto más vibrante
     borderTopWidth: 5,
     borderTopColor: '#2E8B57', // Borde oscuro superior para darle un toque de volumen
   },
   carContainer: {
     position: 'absolute',
-    bottom: 140, // Posicionado exactamente sobre el nivel del terreno
+    bottom: 60, // Posicionado exactamente sobre el nivel del terreno
     width: 80,
     height: 60,
     alignItems: 'center',
@@ -430,25 +467,27 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#ccc',
   },
-  controls: {
+  calibrateButton: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: 30,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  controlButton: {
-    backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    alignItems: 'center',
+    zIndex: 10,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
   },
-  controlText: {
+  calibrateIcon: {
     fontSize: 18,
+    marginRight: 6,
+  },
+  calibrateText: {
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#333',
   },
@@ -459,6 +498,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
+    paddingHorizontal: 40,
   },
   gameOverText: {
     fontSize: 50,
