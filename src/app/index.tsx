@@ -41,7 +41,7 @@ function Cloud({ top, left }: { top: number; left: number }) {
 }
 
 export default function WheelyMeGame() {
-  const [carX, setCarX] = useState(SCREEN_WIDTH / 2 - 30);
+  const [carX, setCarX] = useState(0);
   const [carAngle, setCarAngle] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [gameOverReason, setGameOverReason] = useState('');
@@ -150,39 +150,45 @@ export default function WheelyMeGame() {
       // Calculate adjusted tilt
       const currentTilt = tiltRef.current - calibratedZeroRef.current;
 
-      // Update velocities based on tilt (sensor input)
-      // If tilted right (positive), accelerate right. If left (negative), accelerate left.
-      // We apply a deadzone of roughly 3 degrees to avoid jitter when holding still
+      // --- Movimiento horizontal ---
+      // El giroscopio SOLO controla la velocidad horizontal, NO la rotación.
       if (Math.abs(currentTilt) > 3) {
-        // factor determines how fast it accelerates based on tilt angle
-        const factor = currentTilt / 30; // 30 degrees tilt is 1x factor
+        const factor = currentTilt / 30;
         velocityX.current += 150 * factor * dt;
-        velocityAngle.current += 80 * factor * dt;
       } else {
-        // Friction when nearly flat
-        velocityX.current *= 0.95;
+        velocityX.current *= 0.95; // Fricción al estar plano
+      }
+      // Amortiguación natural de la velocidad horizontal (resistencia del aire / ruedas)
+      velocityX.current *= 0.99;
+
+      // --- Física de rotación tipo vehículo ---
+      // La gravedad actúa como un RESORTE que intenta devolver el carrito a 0°.
+      // Mientras el ángulo sea pequeño, lo corrige. Si pasa el punto crítico, lo tumba.
+      const TIPPING_ANGLE = 35; // Ángulo a partir del cual el carrito empieza a caer sin control
+      const GRAVITY_RESTORE = 120; // Fuerza con la que la gravedad lo endereza
+      const GRAVITY_TOPPLE  = 180; // Fuerza con la que la gravedad lo tumba si ya pasó el umbral
+
+      const carAngleSnapshot = carAngle; // valor actual del ángulo para usar en los cálculos
+
+      if (Math.abs(carAngleSnapshot) < TIPPING_ANGLE) {
+        // Dentro del rango seguro: la gravedad RESTAURA hacia 0°
+        velocityAngle.current -= carAngleSnapshot * GRAVITY_RESTORE * dt;
+      } else {
+        // Pasó el punto crítico: la gravedad lo TUMBA en la misma dirección
+        velocityAngle.current += Math.sign(carAngleSnapshot) * GRAVITY_TOPPLE * dt;
       }
 
-      // Gravity / Balance effect on angle
-      // The car naturally wants to tilt more if it's already tilted
-      velocityAngle.current += carAngle * 2 * dt;
-      velocityAngle.current *= 0.92; // Angular damping
+      // Amortiguación angular (las ruedas / suspensión absorben oscilaciones)
+      velocityAngle.current *= 0.88;
 
-      setCarX(prev => {
-        let newX = prev + velocityX.current * dt;
-        const CAR_WIDTH = 80;
+      // Pequeño impulso de desequilibrio por velocidad lateral alta
+      // (simula que el carrito se desequilibra un poco cuando va muy rápido)
+      const speedFactor = Math.abs(velocityX.current) / 400;
+      if (speedFactor > 0.5) {
+        velocityAngle.current += Math.sign(velocityX.current) * speedFactor * 8 * dt;
+      }
 
-        // Si sale completamente por la derecha, reaparece justo fuera por la izquierda
-        if (newX > SCREEN_WIDTH) {
-          newX = -CAR_WIDTH;
-        }
-        // Si sale completamente por la izquierda, reaparece justo fuera por la derecha
-        else if (newX < -CAR_WIDTH) {
-          newX = SCREEN_WIDTH;
-        }
-
-        return newX;
-      });
+      setCarX(prev => prev + velocityX.current * dt);
 
       setCarAngle(prev => {
         const newAngle = prev + velocityAngle.current * dt;
@@ -219,7 +225,7 @@ export default function WheelyMeGame() {
   }, [gameOver]);
 
   const handleRestart = () => {
-    setCarX(SCREEN_WIDTH / 2 - 30);
+    setCarX(0);
     setCarAngle(0);
     setGameOver(false);
     setGameOverReason('');
@@ -245,34 +251,60 @@ export default function WheelyMeGame() {
       </View>
 
       <View style={styles.gameArea}>
-        {/* Estrellas dinámicas en el fondo */}
+        {/* Estrellas dinámicas en el fondo (Parallax lento) */}
         <View style={[StyleSheet.absoluteFill, { opacity: starOpacity }]}>
-          {STARS.map((star, i) => (
-            <View
-              key={i}
-              style={{
-                position: 'absolute',
-                top: star.top,
-                left: star.left,
-                width: star.size,
-                height: star.size,
-                backgroundColor: '#FFF',
-                borderRadius: star.size / 2,
-              }}
-            />
-          ))}
+          {STARS.map((star, i) => {
+            // Evitar que aparezcan de golpe calculando un área de renderizado ligeramente más grande que la pantalla
+            const wrapWidth = SCREEN_WIDTH + 50;
+            const starX = ((star.left - carX * 0.1) % wrapWidth + wrapWidth) % wrapWidth - 25;
+            return (
+              <View
+                key={i}
+                style={{
+                  position: 'absolute',
+                  top: star.top,
+                  left: starX,
+                  width: star.size,
+                  height: star.size,
+                  backgroundColor: '#FFF',
+                  borderRadius: star.size / 2,
+                }}
+              />
+            );
+          })}
         </View>
 
-        {/* Nubes - siempre visibles */}
-        {CLOUDS.map((cloud, i) => (
-          <Cloud key={`cloud-${i}`} top={cloud.top} left={cloud.left} />
-        ))}
+        {/* Nubes - siempre visibles (Parallax medio) */}
+        {CLOUDS.map((cloud, i) => {
+          const wrapWidth = SCREEN_WIDTH + 200; 
+          const cloudX = ((cloud.left - carX * 0.3) % wrapWidth + wrapWidth) % wrapWidth - 150;
+          return <Cloud key={`cloud-${i}`} top={cloud.top} left={cloudX} />;
+        })}
 
-        {/* Simple Slope Terrain */}
-        <View style={styles.terrain} />
+        {/* Terreno con marcas para notar el movimiento de la cámara (Parallax 1:1) */}
+        <View style={styles.terrain}>
+          {Array.from({ length: Math.ceil(SCREEN_WIDTH / 50) + 2 }).map((_, i) => {
+            const wrapWidth = SCREEN_WIDTH + 60;
+            const markerX = (((i * 50) - carX) % wrapWidth + wrapWidth) % wrapWidth - 30;
+            return (
+              <View 
+                key={`marker-${i}`} 
+                style={{
+                  position: 'absolute', 
+                  top: 8, 
+                  left: markerX, 
+                  width: 15, 
+                  height: 4, 
+                  backgroundColor: '#388E3C', 
+                  borderRadius: 2
+                }} 
+              />
+            );
+          })}
+        </View>
 
-        {/* Car */}
-        <View style={[styles.carContainer, { transform: [{ translateX: carX }, { rotate: `${carAngle}deg` }] }]}>
+        {/* Car - Ahora permanece fijo en el centro horizontalmente (la cámara lo sigue) */}
+        <View style={[styles.carContainer, { transform: [{ translateX: SCREEN_WIDTH / 2 - 30 }, { rotate: `${carAngle}deg` }] }]}>
           <View style={styles.characterPlaceholder} />
           <View style={styles.carBody} />
           <View style={styles.wheelsContainer}>
