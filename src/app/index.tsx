@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer, LightSensor } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Ancho máximo estimado para generar estrellas uniformemente sin depender del ancho inicial de la pantalla
@@ -51,6 +51,7 @@ export default function WheelyMeGame() {
   const [carAngle, setCarAngle] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [gameOverReason, setGameOverReason] = useState('');
+  const [paused, setPaused] = useState(false);
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [tiltDisplay, setTiltDisplay] = useState('0°');
@@ -61,6 +62,11 @@ export default function WheelyMeGame() {
   const velocityX = useRef(0);
   const velocityAngle = useRef(0);
   const loopRef = useRef<number>(null);
+
+  // Pause: usamos un ref para que el game loop lo lea sincrónicamente
+  // (setState es asíncrono y el loop no lo vería a tiempo)
+  const pausedRef = useRef(false);
+  const lastTimeRef = useRef(0);
 
   // Gyroscope / Accelerometer references
   const tiltRef = useRef(0);
@@ -146,12 +152,22 @@ export default function WheelyMeGame() {
   useEffect(() => {
     if (gameOver) return;
 
-    let lastTime = Date.now();
+    lastTimeRef.current = Date.now();
 
     const tick = () => {
       const now = Date.now();
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
+
+      // Si está pausado, no procesamos nada de física/puntuación.
+      // Solo reprogramamos el siguiente frame y reseteamos lastTime
+      // para que al reanudar no haya un salto enorme de dt.
+      if (pausedRef.current) {
+        lastTimeRef.current = now;
+        loopRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const dt = (now - lastTimeRef.current) / 1000;
+      lastTimeRef.current = now;
 
       // Calculate adjusted tilt
       const currentTilt = tiltRef.current - calibratedZeroRef.current;
@@ -238,10 +254,35 @@ export default function WheelyMeGame() {
     setScore(0);
     velocityX.current = 0;
     velocityAngle.current = 0;
+    pausedRef.current = false;
+    setPaused(false);
   };
 
   const handleCalibrate = () => {
     calibratedZeroRef.current = tiltRef.current;
+  };
+
+  const handlePause = () => {
+    pausedRef.current = true;
+    setPaused(true);
+  };
+
+  const handleResume = () => {
+    pausedRef.current = false;
+    setPaused(false);
+  };
+
+  const handlePauseRestart = () => {
+    // Primero despausa, luego reinicia todo
+    pausedRef.current = false;
+    setPaused(false);
+    setCarX(0);
+    setCarAngle(0);
+    setGameOver(false);
+    setGameOverReason('');
+    setScore(0);
+    velocityX.current = 0;
+    velocityAngle.current = 0;
   };
 
   return (
@@ -317,9 +358,21 @@ export default function WheelyMeGame() {
         paddingRight: Math.max(insets.right, 20) 
       }]}>
         <Text style={styles.title}>Wheely Me</Text>
-        <View style={styles.scoreContainer}>
-          <Text style={styles.score}>Puntaje: {Math.floor(score)}</Text>
-          <Text style={styles.highScore}>Récord: {highScore}</Text>
+        <View style={styles.hudRight}>
+          <View style={styles.scoreContainer}>
+            <Text style={styles.score}>Puntaje: {Math.floor(score)}</Text>
+            <Text style={styles.highScore}>Récord: {highScore}</Text>
+          </View>
+          {/* Botón de pausa: solo visible cuando el juego está activo y no pausado */}
+          {!gameOver && !paused && (
+            <TouchableOpacity
+              style={styles.pauseButton}
+              onPress={handlePause}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pauseButtonIcon}>⏸</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -344,6 +397,29 @@ export default function WheelyMeGame() {
           <TouchableOpacity style={styles.restartButton} onPress={handleRestart}>
             <Text style={styles.restartButtonText}>Reiniciar</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Menú de pausa */}
+      {paused && !gameOver && (
+        <View style={styles.pauseOverlay}>
+          <View style={styles.pauseMenu}>
+            <Text style={styles.pauseTitle}>PAUSA</Text>
+            <TouchableOpacity
+              style={styles.pauseMenuButton}
+              onPress={handleResume}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pauseMenuButtonText}>▶  Continuar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.pauseMenuButton, styles.pauseRestartButton]}
+              onPress={handlePauseRestart}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pauseMenuButtonText}>🔄  Reiniciar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -383,6 +459,11 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 5,
+  },
+  hudRight: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
   },
   scoreContainer: {
     alignItems: 'flex-end',
@@ -536,6 +617,81 @@ const styles = StyleSheet.create({
   },
   restartButtonText: {
     fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  // --- Estilos del sistema de pausa ---
+  pauseButton: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  pauseButtonIcon: {
+    fontSize: 20,
+    color: '#fff',
+  },
+  pauseOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  pauseMenu: {
+    backgroundColor: 'rgba(30,30,50,0.95)',
+    borderRadius: 24,
+    paddingVertical: 30,
+    paddingHorizontal: 50,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+  },
+  pauseTitle: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 6,
+    marginBottom: 28,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 8,
+  },
+  pauseMenuButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    marginVertical: 8,
+    minWidth: 200,
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  pauseRestartButton: {
+    backgroundColor: '#FF7043',
+  },
+  pauseMenuButtonText: {
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
   },
