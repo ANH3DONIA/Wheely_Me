@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * This script is used to reset the project to a blank state.
- * It deletes or moves the /src and /scripts directories to /example based on user input and creates a new /src/app directory with an index.tsx and _layout.tsx file.
- * You can remove the `reset-project` script from package.json and safely delete this file after running it.
- */
+* Este script se utiliza para restablecer el proyecto a un estado vacío.
+* Elimina o mueve los directorios /src y /scripts a /example según la entrada del usuario y crea un nuevo directorio /src/app con los archivos index.tsx y _layout.tsx.
+* Puede eliminar el script `reset-project` de package.json y borrar este archivo de forma segura después de ejecutarlo.
+*/
 
 const fs = require("fs");
 const path = require("path");
@@ -89,10 +89,9 @@ const moveDirectories = async (userInput) => {
 
     console.log("\n✅ Project reset complete. Next steps:");
     console.log(
-      `1. Run \`npx expo start\` to start a development server.\n2. Edit src/app/index.tsx to edit the main screen.\n3. Put all your application code in /src, only screens and layout files should be in /src/app.${
-        userInput === "y"
-          ? `\n4. Delete the /${exampleDir} directory when you're done referencing it.`
-          : ""
+      `1. Run \`npx expo start\` to start a development server.\n2. Edit src/app/index.tsx to edit the main screen.\n3. Put all your application code in /src, only screens and layout files should be in /src/app.${userInput === "y"
+        ? `\n4. Delete the /${exampleDir} directory when you're done referencing it.`
+        : ""
       }`
     );
   } catch (error) {
