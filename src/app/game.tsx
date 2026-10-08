@@ -2,7 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer, LightSensor } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { submitScore } from '@/lib/db';
 
 // Ancho máximo estimado para generar estrellas uniformemente sin depender del ancho inicial de la pantalla
 const MAX_BG_WIDTH = 2000;
@@ -71,6 +74,30 @@ export default function WheelyMeGame() {
   // Gyroscope / Accelerometer references
   const tiltRef = useRef(0);
   const calibratedZeroRef = useRef(0);
+
+  // --- Base de datos: guardar la partida en Supabase al terminar ---
+  const scoreRef = useRef(0);
+  const carXRef = useRef(0);
+  const startedAtRef = useRef(0);
+  useEffect(() => {
+    scoreRef.current = score;
+    carXRef.current = carX;
+  }, [score, carX]);
+
+  useEffect(() => {
+    if (!gameOver) {
+      startedAtRef.current = Date.now();
+      return;
+    }
+    submitScore({
+      score: scoreRef.current,
+      distance: Math.abs(carXRef.current),
+      coins: 0, // TODO equipo de juego: pasar las monedas recogidas cuando existan
+      durationSeconds: (Date.now() - startedAtRef.current) / 1000,
+    }).catch(() => {
+      // Sin internet: la partida no se sube, el récord local sigue guardado
+    });
+  }, [gameOver]);
 
   // Cargar récord guardado al iniciar
   useEffect(() => {
@@ -396,6 +423,9 @@ export default function WheelyMeGame() {
           <Text style={styles.gameOverScore}>Récord: {highScore}</Text>
           <TouchableOpacity style={styles.restartButton} onPress={handleRestart}>
             <Text style={styles.restartButtonText}>Reiniciar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.restartButton, { marginTop: 12 }]} onPress={() => router.replace('/menu')}>
+            <Text style={styles.restartButtonText}>Menú</Text>
           </TouchableOpacity>
         </View>
       )}

@@ -51,8 +51,8 @@ export default function AuthScreen() {
       });
 
       if (result.success) {
-        // Autenticación exitosa → ir al juego
-        router.replace('/game');
+        // Autenticación exitosa → ir al menú (perfil, ranking, tienda y juego)
+        router.replace('/menu');
       } else {
         // Manejar los distintos tipos de error/cancelación
         if (result.error === 'user_cancel') {
